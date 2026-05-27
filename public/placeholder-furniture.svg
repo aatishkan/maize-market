@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300" fill="none">
+  <rect width="400" height="300" fill="#F3F4F6"/>
+  <rect x="100" y="120" width="200" height="80" rx="8" fill="#E5E7EB"/>
+  <rect x="90" y="180" width="20" height="40" rx="4" fill="#D1D5DB"/>
+  <rect x="290" y="180" width="20" height="40" rx="4" fill="#D1D5DB"/>
+  <rect x="130" y="100" width="140" height="30" rx="6" fill="#D1D5DB"/>
+  <text x="200" y="260" text-anchor="middle" fill="#9CA3AF" font-family="system-ui" font-size="12">No photo</text>
+</svg>

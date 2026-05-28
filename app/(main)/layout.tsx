@@ -1,4 +1,5 @@
 import { unstable_noStore as noStore } from 'next/cache';
+import Link from 'next/link';
 import { Navbar } from '@/components/shared/Navbar';
 import { EarlyBrowseNudge } from '@/components/shared/EarlyBrowseNudge';
 import { MoveInDatePromptWrapper } from '@/components/profile/MoveInDatePromptWrapper';
@@ -91,7 +92,20 @@ export default async function MainLayout({ children, searchParams }: MainLayoutP
         {children}
       </main>
 
-      <footer className="border-t border-border py-6 text-center">
+      <footer className="border-t border-border py-6 text-center space-y-2">
+        <nav className="flex items-center justify-center gap-4 text-xs">
+          <Link href="/about" className="text-muted-foreground hover:text-foreground transition-colors">
+            About
+          </Link>
+          <span className="text-border" aria-hidden>·</span>
+          <Link href="/listings" className="text-muted-foreground hover:text-foreground transition-colors">
+            Browse
+          </Link>
+          <span className="text-border" aria-hidden>·</span>
+          <Link href="/listings/new" className="text-muted-foreground hover:text-foreground transition-colors">
+            Sell
+          </Link>
+        </nav>
         <p className="text-xs text-muted-foreground">
           MaizeMarket is a student project, not affiliated with the University of Michigan.
           <br />

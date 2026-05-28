@@ -1,3 +1,4 @@
+import { unstable_noStore as noStore } from 'next/cache';
 import { Navbar } from '@/components/shared/Navbar';
 import { EarlyBrowseNudge } from '@/components/shared/EarlyBrowseNudge';
 import { MoveInDatePromptWrapper } from '@/components/profile/MoveInDatePromptWrapper';
@@ -11,7 +12,12 @@ interface MainLayoutProps {
   searchParams?: Promise<{ prompt_move_in?: string }>;
 }
 
+// Force fresh server data on every request — prevents Next.js Data Cache from
+// serving a stale getUser() response that predates the user's login.
+export const dynamic = 'force-dynamic';
+
 export default async function MainLayout({ children, searchParams }: MainLayoutProps) {
+  noStore(); // belt-and-suspenders: also disable per-fetch memoisation
   const supabase = await createClient();
   const {
     data: { user },
@@ -32,6 +38,21 @@ export default async function MainLayout({ children, searchParams }: MainLayoutP
     ]);
 
     profile = profileResult.data as Profile | null;
+
+    // Safety net: the signup trigger should create the profile row automatically,
+    // but if it didn't (e.g. the user was created before migrations ran) upsert it
+    // now so the Navbar always has something to render.
+    if (!profile) {
+      const displayName =
+        (user.user_metadata?.display_name as string | undefined) ??
+        user.email!.split('@')[0];
+      await supabase.from('profiles').upsert(
+        { id: user.id, email: user.email!, display_name: displayName },
+        { onConflict: 'id', ignoreDuplicates: true }
+      );
+      const retry = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      profile = retry.data as Profile | null;
+    }
 
     const convoIds = (convoResult.data ?? []).map((c) => (c as { id: string }).id);
     if (convoIds.length > 0) {

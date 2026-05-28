@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { MessageSquare, Plus, User, LogOut, Menu, X } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { cn, getInitials } from '@/lib/utils';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -18,20 +18,54 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import type { Profile } from '@/types/database';
 
 interface NavbarProps {
+  /** Server-provided initial profile — used for SSR and as the starting state. */
   profile: Profile | null;
   unreadCount?: number;
 }
 
-export function Navbar({ profile, unreadCount = 0 }: NavbarProps) {
+export function Navbar({ profile: serverProfile, unreadCount = 0 }: NavbarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const supabase = createClient();
+
+  // The Navbar owns its own auth state so it stays correct regardless of
+  // whether the server-side layout had a stale/cached getUser() result.
+  // Initialise from the server prop to avoid a flash on the first render.
+  const [profile, setProfile] = useState<Profile | null>(serverProfile);
+
+  // Stable client reference — never re-created across renders.
+  const supabase = useRef(createClient()).current;
+
+  useEffect(() => {
+    // onAuthStateChange fires immediately with INITIAL_SESSION (the current
+    // browser session), then again on every sign-in / sign-out / token refresh.
+    // This is the single source of truth for the Navbar's auth state.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        if (!session?.user) {
+          setProfile(null);
+          return;
+        }
+
+        // Fetch (or re-fetch) the profile whenever the session changes.
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        setProfile(data as Profile | null);
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
 
   const handleSignOut = async () => {
+    setMobileOpen(false);
     await supabase.auth.signOut();
+    // onAuthStateChange will set profile → null automatically.
     router.push('/login');
-    router.refresh();
   };
 
   return (
@@ -193,7 +227,7 @@ export function Navbar({ profile, unreadCount = 0 }: NavbarProps) {
                 My profile
               </Link>
               <button
-                onClick={() => { setMobileOpen(false); handleSignOut(); }}
+                onClick={handleSignOut}
                 className="block w-full text-left px-3 py-2 text-red-400 text-sm font-medium rounded-md hover:bg-white/10"
               >
                 Sign out

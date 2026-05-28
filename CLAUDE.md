@@ -56,6 +56,8 @@ university branding language or aesthetics.
   const cookieStore = await cookies();
   ```
 - Server Components that use `useSearchParams` must be wrapped in `<Suspense>`.
+- **Layouts do NOT receive `searchParams`** — only pages do. Do not add
+  `searchParams` to a layout's props and expect it to work.
 - The `middleware.ts` file convention is **deprecated** in Next.js 16; it should be
   renamed to `proxy.ts`. Non-blocking for now — tracked in Outstanding Items.
 
@@ -161,6 +163,92 @@ const ids = (convos ?? []).map((c) => (c as { id: string }).id);
 await supabase.from('messages').select('*').in('conversation_id', ids);
 ```
 
+### Supabase auth cookies on redirect responses — CRITICAL
+
+When a Route Handler or middleware creates a `NextResponse.redirect()`, session
+cookies written via `setAll` (from `exchangeCodeForSession`, `verifyOtp`, or a
+session refresh) are **not carried automatically** because the redirect is a new
+response object. Always collect the cookies from `setAll` and set them on the
+redirect response explicitly:
+
+```ts
+// WRONG — cookies go nowhere:
+const { error } = await supabase.auth.exchangeCodeForSession(code);
+return NextResponse.redirect(destination);
+
+// RIGHT — collect first, then attach:
+const pending: { name: string; value: string; options: object }[] = [];
+const supabase = createServerClient(url, key, {
+  cookies: {
+    getAll: () => cookieStore.getAll(),
+    setAll: (cs) => cs.forEach((c) => pending.push(c)),   // collect
+  },
+});
+const { error } = await supabase.auth.exchangeCodeForSession(code);
+const response = NextResponse.redirect(destination);
+pending.forEach(({ name, value, options }) =>
+  response.cookies.set(name, value, options as ...)      // attach
+);
+return response;
+```
+
+The same applies in middleware: use the `withSessionCookies()` helper defined
+in `lib/supabase/middleware.ts` whenever returning a redirect instead of
+`supabaseResponse`.
+
+### Next.js Data Cache and `getUser()` in layouts
+
+`supabase.auth.getUser()` makes a GET fetch to `/auth/v1/user`. Next.js's Data
+Cache can memoize this and serve a stale `null` response after the user logs in,
+causing layouts to think the user isn't authenticated.
+
+**Any layout or page that renders auth-sensitive UI must:**
+```ts
+export const dynamic = 'force-dynamic';   // top of file
+// AND inside the component:
+import { unstable_noStore as noStore } from 'next/cache';
+noStore();
+```
+
+`(main)/layout.tsx` already has both. **Do not remove them.**
+
+### Navbar auth state — must use `onAuthStateChange`
+
+The Navbar is a `'use client'` component. **Do not** make it a pure function of a
+server-provided `profile` prop. The server prop is only the initial state. The
+Navbar subscribes to `supabase.auth.onAuthStateChange` to stay correct through the
+full session lifetime:
+
+```ts
+const supabase = useRef(createClient()).current;   // stable ref, never recreated
+
+useEffect(() => {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    async (_event, session) => {
+      if (!session?.user) { setProfile(null); return; }
+      const { data } = await supabase.from('profiles').select('*')
+        .eq('id', session.user.id).single();
+      setProfile(data as Profile | null);
+    }
+  );
+  return () => subscription.unsubscribe();
+}, [supabase]);
+```
+
+`onAuthStateChange` fires immediately with `INITIAL_SESSION` on mount, which
+self-corrects any stale server prop before the user sees it.
+
+### Post-login navigation — use `window.location.href`
+
+After `signInWithPassword()` succeeds, use a hard navigation instead of
+`router.push() + router.refresh()`. Hard navigation guarantees a fresh server
+render (reading the freshly-set session cookies) and avoids router-cache timing
+issues:
+
+```ts
+window.location.href = next;   // in the login form's onSubmit
+```
+
 ---
 
 ## Project Structure
@@ -168,13 +256,15 @@ await supabase.from('messages').select('*').in('conversation_id', ids);
 ```
 maize-market/
 ├── app/
+│   ├── page.tsx             # Redirects / → /listings (outside route groups)
 │   ├── (auth)/              # Login, register, verify pages + auth layout
-│   ├── (main)/              # All authenticated pages + main layout w/ Navbar
-│   │   ├── page.tsx         # Home: hero + recent listings + seasonal CTA
+│   ├── (main)/              # Authenticated shell — Navbar, footer, nudge banner
+│   │   ├── layout.tsx       # force-dynamic + noStore; profile safety-net upsert
+│   │   ├── page.tsx         # Hero page (NOTE: unreachable — shadowed by app/page.tsx)
 │   │   ├── listings/        # Browse, new, [id] detail, [id]/edit
 │   │   ├── messages/        # Inbox list + [id] conversation thread
 │   │   └── profile/         # Own profile + [id] public profile
-│   ├── api/auth/callback/   # Supabase OAuth/email callback handler
+│   ├── api/auth/callback/   # PKCE + OTP email verification handler
 │   ├── globals.css          # Tailwind v4 @theme inline custom tokens
 │   └── layout.tsx           # Root layout: fonts, <Toaster>, metadata
 ├── components/
@@ -182,26 +272,66 @@ maize-market/
 │   │                        #   ListingGrid, MarkSoldButton, ContactSellerButton
 │   ├── messages/            # ConversationList, MessageThread (Realtime)
 │   ├── profile/             # ProfileClient, MoveInDatePrompt, MoveInDatePromptWrapper
-│   ├── shared/              # Navbar, EmptyState, EarlyBrowseNudge
+│   ├── shared/              # Navbar (onAuthStateChange), EmptyState, EarlyBrowseNudge
 │   └── ui/                  # shadcn primitives (button, input, dialog, etc.)
 ├── lib/
-│   ├── supabase/            # client.ts, server.ts, middleware.ts
+│   ├── supabase/
+│   │   ├── client.ts        # createBrowserClient() — no <Database> generic
+│   │   ├── server.ts        # createServerClient() via await cookies()
+│   │   └── middleware.ts    # updateSession() + withSessionCookies() helper
 │   ├── constants.ts         # NEIGHBORHOODS, CATEGORIES, LOGISTICS_TIERS, STORAGE_BUCKET
 │   ├── nudge.ts             # Season-aware nudge logic (pure functions)
 │   └── utils.ts             # cn(), formatPrice(), dollarsToCents(), getImageUrl(), etc.
-├── supabase/migrations/     # 00001_initial_schema.sql — full schema + RLS
+├── supabase/
+│   ├── config.toml          # Created by `supabase init` (project: maize-market)
+│   └── migrations/
+│       ├── 00001_initial_schema.sql   # Full schema, RLS, triggers, storage bucket
+│       └── 00002_enable_realtime.sql  # ALTER PUBLICATION supabase_realtime ADD TABLE messages
 ├── types/
 │   └── database.ts          # Hand-written domain types (ListingWithImages, etc.)
-├── middleware.ts             # Route protection via updateSession()
+├── middleware.ts             # Route protection (rename to proxy.ts — see Outstanding Items)
+├── next.config.ts           # remotePatterns for Supabase Storage hostname
 └── public/
     └── placeholder-furniture.svg
 ```
 
+> **Note on `app/page.tsx` vs `app/(main)/page.tsx`:** Both resolve to `/`.
+> `app/page.tsx` takes precedence and immediately redirects to `/listings`.
+> The hero page at `app/(main)/page.tsx` is currently unreachable. If you want
+> the hero at `/`, delete `app/page.tsx`.
+
+---
+
+## Live Supabase Project
+
+| Field | Value |
+|---|---|
+| Project name | maize-market |
+| Region | East US (us-east-1) |
+| Project URL | `https://epalutgizprnnzzpdeyk.supabase.co` |
+| Project ref | `epalutgizprnnzzpdeyk` |
+| Supabase CLI | v2.101.0 (installed via Homebrew) |
+
+Credentials live in `.env.local` (gitignored). See `.env.local.example` for the
+required variable names.
+
+### Pushing future migrations
+
+```bash
+# URL-encode special chars in the password (! → %21, @ → %40, etc.)
+supabase db push --db-url "postgresql://postgres:<encoded-password>@db.epalutgizprnnzzpdeyk.supabase.co:5432/postgres"
+```
+
+### Migrations applied
+
+| File | What it does |
+|---|---|
+| `00001_initial_schema.sql` | Tables, enums, indexes, triggers, RLS policies, storage bucket |
+| `00002_enable_realtime.sql` | Adds `messages` to `supabase_realtime` publication (required for `postgres_changes` subscriptions) |
+
 ---
 
 ## Database Schema
-
-Single migration file: `supabase/migrations/00001_initial_schema.sql`
 
 ### Tables
 
@@ -309,7 +439,14 @@ getSetDateNudge() → NudgeConfig
   For users who haven't set move_in_date yet.
 ```
 
-Move-in date prompt flow: auth callback redirects to `/?prompt_move_in=1` on first login. `app/(main)/layout.tsx` detects this param + no `move_in_date` → renders `<MoveInDatePromptWrapper>` (client component that auto-opens the dialog).
+**Known issue with the prompt_move_in flow:** The original design redirected to
+`/?prompt_move_in=1` after email verification and read that param in
+`(main)/layout.tsx`. But **layouts do not receive `searchParams` in Next.js App
+Router** (only pages do). The `showMoveInPrompt` logic in the layout is currently
+dead code. The auth callback now redirects to `/listings` directly (no query
+param). A future fix should trigger the dialog via a different mechanism (e.g. a
+short-lived cookie checked by the layout, or checking `profile.move_in_date` on
+every load).
 
 ---
 
@@ -327,6 +464,7 @@ Always stored in **cents** (`price_cents integer`). Convert at boundaries:
 - `getPrimaryImageUrl(images: ListingImage[]): string` — lowest `display_order`, falls back to `/placeholder-furniture.svg`
 - `ImageUploader` component manages pending local images before submission
 - Listing ID is generated client-side with `crypto.randomUUID()` before upload so storage paths are stable
+- `next.config.ts` has `remotePatterns` for `epalutgizprnnzzpdeyk.supabase.co` so `next/image` can serve listing photos
 
 ### Realtime (MessageThread)
 
@@ -342,7 +480,9 @@ supabase.channel(`conversation:${conversationId}`)
   .subscribe();
 ```
 
-Optimistic insert with rollback on error. Dedup guard prevents doubles from optimistic + realtime event.
+Realtime works because `00002_enable_realtime.sql` adds `messages` to the
+`supabase_realtime` publication. Optimistic insert with rollback on error. Dedup
+guard prevents doubles from optimistic + realtime event.
 
 ### URL-based filter state
 
@@ -350,7 +490,20 @@ Optimistic insert with rollback on error. Dedup guard prevents doubles from opti
 
 ### Route protection
 
-`middleware.ts` (currently — see Outstanding Items) calls `updateSession()` from `lib/supabase/middleware.ts`. Protected routes: `/messages/*`, `/profile/*`, `/listings/new`, `/listings/*/edit`. Authenticated users visiting `/login` or `/register` are redirected to `/`.
+`middleware.ts` calls `updateSession()` from `lib/supabase/middleware.ts`. Protected
+routes: `/messages/*`, `/profile/*`, `/listings/new`, `/listings/*/edit`.
+Authenticated users visiting `/login` or `/register` are redirected to `/listings`.
+All redirect responses go through `withSessionCookies()` to carry refreshed tokens.
+
+### Auth callback (`/api/auth/callback`)
+
+Handles two flows:
+1. **PKCE** (`?code=xxx`) — `exchangeCodeForSession(code)`
+2. **OTP fallback** (`?token_hash=xxx&type=signup`) — `verifyOtp({ type, token_hash })`
+
+Both collect cookies via `setAll` into a local array and attach them to the
+`NextResponse.redirect()` before returning. Default destination is `/listings`.
+A `?next=/path` param is honoured for deep-linking (same-origin only).
 
 ---
 
@@ -360,9 +513,9 @@ Optimistic insert with rollback on error. Dedup guard prevents doubles from opti
 - [x] Database schema (tables, enums, triggers, RLS, storage bucket)
 - [x] Supabase client helpers (browser, server, middleware)
 - [x] Auth pages: register (umich.edu gate), login, email verify
-- [x] Auth callback route (`/api/auth/callback`)
+- [x] Auth callback route (`/api/auth/callback`) — PKCE + OTP, cookies fixed
 - [x] Route group layouts: `(auth)`, `(main)`
-- [x] Navbar with UMich branding + unread count
+- [x] Navbar with UMich branding + unread count + client-side auth subscription
 - [x] Root layout (fonts, toaster, metadata)
 
 ### Phase 2 — Listings
@@ -397,7 +550,7 @@ Optimistic insert with rollback on error. Dedup guard prevents doubles from opti
 - [x] `/profile/[id]` (public profile, active listings only)
 - [x] `ProfileClient` with owner/viewer modes and Active/Sold tabs
 - [x] `MoveInDatePrompt` dialog
-- [x] First-login move-in date prompt (`?prompt_move_in=1` flow)
+- [x] First-login move-in date prompt (partially broken — see Known Issues)
 - [x] `EarlyBrowseNudge` banner component
 - [x] Season-aware nudge logic in `lib/nudge.ts`
 
@@ -410,52 +563,62 @@ Optimistic insert with rollback on error. Dedup guard prevents doubles from opti
 - [ ] SEO / Open Graph: dynamic `og:image` for listing detail pages
 - [ ] Accessibility audit: keyboard navigation, ARIA labels, focus management
 - [ ] Mobile testing pass: real-device check of all flows
+- [ ] Fix `prompt_move_in` flow: use a cookie-based mechanism instead of a layout `searchParams` prop
 
 ---
 
 ## Current Completion State
 
-**Phases 1–5 are fully scaffolded.** The initial commit (`5c7da88`) contains all
-code for Phases 1–5. Phase 6 items are unbuilt.
+**Phases 1–5 are fully scaffolded and the app runs end-to-end against a live
+Supabase project.** Registration, email verification, login, and the Navbar all
+work correctly. Phase 6 items are unbuilt.
 
-The build compiles cleanly (`npm run build` passes TypeScript and Webpack). The
-only build-time failure is a Supabase client initialization error during static
-prerendering, which is expected because `.env.local` does not exist yet — see
-Outstanding Items below.
+The build compiles cleanly with zero TypeScript errors (`npm run build` passes).
+The Supabase project is live at `epalutgizprnnzzpdeyk.supabase.co` with all
+migrations applied.
 
 ---
 
 ## Outstanding Items
 
-### 1. Missing `.env.local` (blocker for `npm run dev` and `npm run build`)
+### 1. Supabase Auth redirect URL allowlist (action required before testing signup)
 
-Copy `.env.local.example` to `.env.local` and fill in the Supabase project URL
-and anon key:
+Supabase blocks email verification redirects to any host not in the project
+allowlist. Without this, clicking the confirmation link shows an error.
 
-```
-NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
-```
+Go to: **supabase.com/dashboard → project → Authentication → URL Configuration**
 
-Find these values in the Supabase dashboard under **Project Settings → API**.
+Set:
+- **Site URL**: `http://localhost:3000`
+- **Additional Redirect URLs**: `http://localhost:3000/**`
 
-After creating the project, also run the migration:
-```bash
-supabase link --project-ref your-project-ref
-supabase db push
-```
+Add production URLs here when deploying.
 
 ### 2. `middleware.ts` → `proxy.ts` deprecation (non-blocking)
 
-Next.js 16 deprecates the `middleware.ts` file convention in favor of `proxy.ts`.
-The current `middleware.ts` works but logs a deprecation warning on every build:
+Next.js 16 deprecates the `middleware.ts` file convention in favour of `proxy.ts`.
+The app works but every build prints:
 
 ```
 ⚠ The "middleware" file convention is deprecated. Please use "proxy" instead.
 ```
 
-To fix: rename `middleware.ts` to `proxy.ts` (no code changes needed). Do this
-before upgrading to the next major Next.js version.
+Fix: rename `middleware.ts` to `proxy.ts` — no code changes needed. Do this before
+upgrading to the next major Next.js version.
+
+### 3. `app/(main)/page.tsx` hero page is unreachable (low priority)
+
+`app/page.tsx` redirects `/` → `/listings`, shadowing `app/(main)/page.tsx` which
+has the hero, trust signals, and recent listings. If you want the hero page
+accessible at `/`, delete `app/page.tsx`.
+
+### 4. `prompt_move_in` dialog does not fire (medium priority)
+
+Layouts do not receive `searchParams` in Next.js App Router, so the
+`showMoveInPrompt` check in `(main)/layout.tsx` is dead code. The move-in date
+dialog never auto-opens after first login. Fix by replacing the URL-param
+mechanism with a short-lived cookie (`first_login=1`) that the layout sets/reads
+directly, or by always showing the prompt to users with no `move_in_date`.
 
 ---
 

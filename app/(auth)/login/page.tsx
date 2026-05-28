@@ -23,7 +23,7 @@ type FormValues = z.infer<typeof schema>;
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get('next') ?? '/';
+  const next = searchParams.get('next') ?? '/listings';
   const [showPw, setShowPw] = useState(false);
   const [serverError, setServerError] = useState('');
   const supabase = createClient();
@@ -55,8 +55,9 @@ function LoginForm() {
       return;
     }
 
-    router.push(next);
-    router.refresh();
+    // Hard navigation forces a full server render so the Navbar reads the
+    // freshly-set session cookies instead of serving a cached RSC response.
+    window.location.href = next;
   };
 
   return (

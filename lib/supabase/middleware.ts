@@ -2,6 +2,22 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 /**
+ * Copies refreshed session cookies from a Supabase response onto a redirect
+ * response.  Without this, any token refresh that happened during the middleware
+ * call is silently lost whenever we redirect instead of passing `supabaseResponse`
+ * straight through.
+ */
+function withSessionCookies(
+  redirect: ReturnType<typeof NextResponse.redirect>,
+  sessionResponse: NextResponse
+): ReturnType<typeof NextResponse.redirect> {
+  sessionResponse.cookies.getAll().forEach((cookie) => {
+    redirect.cookies.set(cookie.name, cookie.value, cookie);
+  });
+  return redirect;
+}
+
+/**
  * Refreshes the Supabase session and enforces route-level access control.
  * Called from the root middleware.ts on every request.
  */
@@ -38,14 +54,6 @@ export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Routes that require authentication
-  const protectedPaths = [
-    '/listings/new',
-    '/listings/',  // covers /listings/[id]/edit
-    '/messages',
-    '/profile',
-  ];
-
-  // Check if the path requires a login — but allow browsing /listings without auth
   const requiresAuth =
     pathname.startsWith('/messages') ||
     pathname.startsWith('/profile') ||
@@ -56,7 +64,8 @@ export async function updateSession(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = '/login';
     redirectUrl.searchParams.set('next', pathname);
-    return NextResponse.redirect(redirectUrl);
+    // Copy session cookies so a token refresh during this request isn't lost.
+    return withSessionCookies(NextResponse.redirect(redirectUrl), supabaseResponse);
   }
 
   // Redirect logged-in users away from auth pages
@@ -65,9 +74,10 @@ export async function updateSession(request: NextRequest) {
     (pathname.startsWith('/login') || pathname.startsWith('/register'))
   ) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = '/';
+    redirectUrl.pathname = '/listings';
     redirectUrl.searchParams.delete('next');
-    return NextResponse.redirect(redirectUrl);
+    // Copy session cookies so refreshed tokens reach the browser.
+    return withSessionCookies(NextResponse.redirect(redirectUrl), supabaseResponse);
   }
 
   return supabaseResponse;

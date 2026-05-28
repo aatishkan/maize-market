@@ -149,6 +149,47 @@ inside an `@theme inline` block:
 This automatically generates `bg-maize`, `text-um-blue`, `hover:bg-maize-dark`,
 etc. as utility classes. Do not add a `tailwind.config.ts`.
 
+### Supabase migrations — always include `GRANT` statements — CRITICAL
+
+PostgreSQL has **two independent access-control layers**:
+
+1. **Table-level privileges** (`GRANT SELECT ON table TO role`) — the role must
+   have permission to touch the table at all.
+2. **Row Level Security (RLS)** — filters which rows a role can see once it has
+   table-level access.
+
+When you create tables in the Supabase dashboard or SQL editor, Supabase
+automatically runs `ALTER DEFAULT PRIVILEGES` grants. But when you use
+`supabase db push` with raw SQL migrations, **those defaults do NOT apply** to
+your tables — you get exactly what your migration file contains.
+
+Without `GRANT` statements every query returns:
+```json
+{ "code": "42501", "message": "permission denied for table listings" }
+```
+This looks like a 401 from the API and causes the error-fallback UI to render.
+
+**Every migration that creates a new table must include explicit grants.**
+Template to copy:
+
+```sql
+-- authenticated users (mirrors the RLS policies you've defined)
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.my_table TO authenticated;
+
+-- anon (if the table should be publicly browsable — no login required)
+GRANT SELECT ON public.my_table TO anon;
+
+-- and a matching anon RLS policy if you granted SELECT to anon:
+CREATE POLICY "my_table_select_anon"
+  ON my_table FOR SELECT TO anon
+  USING (<same condition as the authenticated SELECT policy>);
+```
+
+This was the root cause of both the "something went wrong loading listings" error
+**and** the Navbar always showing Login/Signup even after login (the profile fetch
+in `onAuthStateChange` also returned null due to the missing `profiles` grant).
+Fixed in migration `00003_grant_table_privileges.sql`.
+
 ### Supabase `.in()` with subquery builders
 
 Supabase JS does not accept a query builder as the array argument to `.in()`.
@@ -328,6 +369,7 @@ supabase db push --db-url "postgresql://postgres:<encoded-password>@db.epalutgiz
 |---|---|
 | `00001_initial_schema.sql` | Tables, enums, indexes, triggers, RLS policies, storage bucket |
 | `00002_enable_realtime.sql` | Adds `messages` to `supabase_realtime` publication (required for `postgres_changes` subscriptions) |
+| `00003_grant_table_privileges.sql` | `GRANT` statements for `authenticated` (all tables) and `anon` (`listings`, `listing_images`); adds anon SELECT RLS policies for public browsing |
 
 ---
 

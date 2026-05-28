@@ -190,6 +190,40 @@ This was the root cause of both the "something went wrong loading listings" erro
 in `onAuthStateChange` also returned null due to the missing `profiles` grant).
 Fixed in migration `00003_grant_table_privileges.sql`.
 
+### `'use client'` is required for any component with event handlers
+
+Any component that passes an event handler (`onError`, `onClick`, `onChange`,
+`onSubmit`, etc.) to a DOM element or to a Next.js built-in Client Component
+(e.g. `<Image>`, `<Link>`) **must** carry a `'use client'` directive, even
+if the component feels purely presentational.
+
+Without `'use client'`, Next.js treats the file as a Server Component and
+throws at runtime:
+
+```
+Error: Event handlers cannot be passed to Client Component props.
+```
+
+**Common trap — `<Image onError={...}>`:**
+```tsx
+// ✗ Server Component — crashes at runtime
+export function ListingCard() {
+  return <Image onError={(e) => { ... }} ... />;
+}
+
+// ✓ Client Component — works correctly
+'use client';
+export function ListingCard() {
+  return <Image onError={(e) => { ... }} ... />;
+}
+```
+
+The component's *parent* does not need `'use client'` — Server Components are
+allowed to import and render Client Components. Only the file that owns the
+event handler needs the directive.
+
+This burned us in `ListingCard.tsx` (fixed in commit `4da31eb`).
+
 ### Supabase `.in()` with subquery builders
 
 Supabase JS does not accept a query builder as the array argument to `.in()`.
@@ -611,30 +645,37 @@ A `?next=/path` param is honoured for deep-linking (same-origin only).
 
 ## Current Completion State
 
-**Phases 1–5 are fully scaffolded and the app runs end-to-end against a live
-Supabase project.** Registration, email verification, login, and the Navbar all
-work correctly. Phase 6 items are unbuilt.
+**Phases 1–5 are complete and all core user flows are verified working
+end-to-end against the live Supabase project:**
+
+- Register (umich.edu gate) → email verification → login → Navbar shows account
+- Create a listing (images upload to Storage, listing appears in browse)
+- Browse listings (public, no login required; filters, search, pagination work)
+- View listing detail → Contact Seller → message thread with Realtime updates
+- Mark listing as sold → status updates, sold overlay appears on card
+- Profile page (own: edit name/move-in date, Active/Sold tabs; public: view seller)
+- Unread message count in Navbar updates correctly
+
+Phase 6 items are unbuilt (see below).
 
 The build compiles cleanly with zero TypeScript errors (`npm run build` passes).
-The Supabase project is live at `epalutgizprnnzzpdeyk.supabase.co` with all
-migrations applied.
+Three runtime bugs fixed since initial deployment: auth cookie forwarding on
+redirect, missing table-level GRANTs (`00003`), and `ListingCard` missing
+`'use client'` for its `onError` handler.
 
 ---
 
 ## Outstanding Items
 
-### 1. Supabase Auth redirect URL allowlist (action required before testing signup)
+### 1. Supabase Auth redirect URL allowlist — add production URLs before deploying
 
-Supabase blocks email verification redirects to any host not in the project
-allowlist. Without this, clicking the confirmation link shows an error.
+**Already configured for local dev** (`http://localhost:3000` and
+`http://localhost:3000/**` are in the allowlist — auth works end-to-end
+locally). Before deploying to production, go to:
 
-Go to: **supabase.com/dashboard → project → Authentication → URL Configuration**
+**supabase.com/dashboard → project → Authentication → URL Configuration**
 
-Set:
-- **Site URL**: `http://localhost:3000`
-- **Additional Redirect URLs**: `http://localhost:3000/**`
-
-Add production URLs here when deploying.
+Add the production domain to both **Site URL** and **Additional Redirect URLs**.
 
 ### 2. `middleware.ts` → `proxy.ts` deprecation (non-blocking)
 

@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { buttonVariants } from '@/components/ui/button';
 import { MarkSoldButton } from '@/components/listings/MarkSoldButton';
 import { ContactSellerButton } from '@/components/listings/ContactSellerButton';
+import { DeleteListingButton } from '@/components/listings/DeleteListingButton';
 import { CATEGORY_MAP, LOGISTICS_MAP } from '@/lib/constants';
 import { formatPrice, formatDate, getImageUrl, getInitials } from '@/lib/utils';
 import type { ListingWithSeller } from '@/types/database';
@@ -192,6 +193,7 @@ export default async function ListingDetailPage({ params }: Props) {
                 <Pencil className="h-4 w-4" />
                 Edit listing
               </Link>
+              <DeleteListingButton listingId={typedListing.id} />
             </div>
           ) : user && !isSold ? (
             <ContactSellerButton

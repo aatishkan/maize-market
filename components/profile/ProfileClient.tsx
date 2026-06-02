@@ -40,10 +40,12 @@ export function ProfileClient({ profile, listings, isOwner }: ProfileClientProps
   const supabase = createClient();
   const [editing, setEditing] = useState(false);
 
+  const [saving, setSaving] = useState(false);
+
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
@@ -53,20 +55,29 @@ export function ProfileClient({ profile, listings, isOwner }: ProfileClientProps
   });
 
   const onSave = async (values: ProfileFormValues) => {
-    const { error } = await supabase
-      .from('profiles')
-      .update({
-        display_name: values.display_name.trim(),
-        move_in_date: values.move_in_date || null,
-      })
-      .eq('id', profile.id);
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          display_name: values.display_name.trim(),
+          move_in_date: values.move_in_date || null,
+        })
+        .eq('id', profile.id);
 
-    if (error) {
-      toast.error('Failed to save changes. Try again.');
-    } else {
-      toast.success('Profile updated!');
-      setEditing(false);
-      router.refresh();
+      if (error) {
+        console.error('[ProfileClient] profile update error:', error);
+        toast.error('Failed to save changes. Try again.');
+      } else {
+        toast.success('Profile updated!');
+        setEditing(false);
+        router.refresh();
+      }
+    } catch (err) {
+      console.error('[ProfileClient] unexpected error:', err);
+      toast.error('Something went wrong. Try again.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -116,9 +127,9 @@ export function ProfileClient({ profile, listings, isOwner }: ProfileClientProps
               </div>
 
               <div className="flex gap-2">
-                <Button type="submit" disabled={isSubmitting} size="sm"
+                <Button type="submit" disabled={saving} size="sm"
                   className="bg-um-blue text-white hover:bg-um-blue-light">
-                  {isSubmitting ? 'Saving…' : 'Save'}
+                  {saving ? 'Saving…' : 'Save'}
                 </Button>
                 <Button type="button" variant="ghost" size="sm"
                   onClick={() => setEditing(false)}>

@@ -58,8 +58,9 @@ university branding language or aesthetics.
 - Server Components that use `useSearchParams` must be wrapped in `<Suspense>`.
 - **Layouts do NOT receive `searchParams`** — only pages do. Do not add
   `searchParams` to a layout's props and expect it to work.
-- The `middleware.ts` file convention is **deprecated** in Next.js 16; it should be
-  renamed to `proxy.ts`. Non-blocking for now — tracked in Outstanding Items.
+- The `middleware.ts` file convention is **deprecated** in Next.js 16 and has been
+  renamed to `proxy.ts` (done — see `proxy.ts` in the project root). The exported
+  function is also renamed from `middleware` to `proxy`.
 
 ### shadcn v4 / Base UI — NO `asChild` PROP
 
@@ -364,7 +365,7 @@ maize-market/
 │       └── 00002_enable_realtime.sql  # ALTER PUBLICATION supabase_realtime ADD TABLE messages
 ├── types/
 │   └── database.ts          # Hand-written domain types (ListingWithImages, etc.)
-├── middleware.ts             # Route protection (rename to proxy.ts — see Outstanding Items)
+├── proxy.ts                  # Route protection (renamed from middleware.ts per Next.js 16)
 ├── next.config.ts           # remotePatterns for Supabase Storage hostname
 └── public/
     └── placeholder-furniture.svg
@@ -389,6 +390,29 @@ maize-market/
 
 Credentials live in `.env.local` (gitignored). See `.env.local.example` for the
 required variable names.
+
+### Live Production Deployment
+
+| Field | Value |
+|---|---|
+| Platform | Vercel (Hobby) |
+| Production URL | `https://maize-market-peach.vercel.app` |
+| Git branch | `main` (auto-deploys on every push) |
+
+**Vercel environment variables** (set under Settings → Environment Variables,
+Production + Preview environments):
+
+| Variable | Set? |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | ✅ |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ |
+
+**Supabase Auth redirect URL allowlist** (Authentication → URL Configuration):
+- Site URL: `https://maize-market-peach.vercel.app`
+- Redirect URLs: `https://maize-market-peach.vercel.app/**`, `http://localhost:3000/**`
+
+When adding a custom domain, add it to both the Vercel project (Settings →
+Domains) and the Supabase redirect URL allowlist.
 
 ### Pushing future migrations
 
@@ -659,6 +683,9 @@ end-to-end against the live Supabase project:**
 Phase 6 items are unbuilt (see below).
 
 The build compiles cleanly with zero TypeScript errors (`npm run build` passes).
+The app is deployed to production at `https://maize-market-peach.vercel.app`
+and auto-deploys on every push to `main`.
+
 Three runtime bugs fixed since initial deployment: auth cookie forwarding on
 redirect, missing table-level GRANTs (`00003`), and `ListingCard` missing
 `'use client'` for its `onError` handler.
@@ -667,35 +694,13 @@ redirect, missing table-level GRANTs (`00003`), and `ListingCard` missing
 
 ## Outstanding Items
 
-### 1. Supabase Auth redirect URL allowlist — add production URLs before deploying
-
-**Already configured for local dev** (`http://localhost:3000` and
-`http://localhost:3000/**` are in the allowlist — auth works end-to-end
-locally). Before deploying to production, go to:
-
-**supabase.com/dashboard → project → Authentication → URL Configuration**
-
-Add the production domain to both **Site URL** and **Additional Redirect URLs**.
-
-### 2. `middleware.ts` → `proxy.ts` deprecation (non-blocking)
-
-Next.js 16 deprecates the `middleware.ts` file convention in favour of `proxy.ts`.
-The app works but every build prints:
-
-```
-⚠ The "middleware" file convention is deprecated. Please use "proxy" instead.
-```
-
-Fix: rename `middleware.ts` to `proxy.ts` — no code changes needed. Do this before
-upgrading to the next major Next.js version.
-
-### 3. `app/(main)/page.tsx` hero page is unreachable (low priority)
+### 1. `app/(main)/page.tsx` hero page is unreachable (low priority)
 
 `app/page.tsx` redirects `/` → `/listings`, shadowing `app/(main)/page.tsx` which
 has the hero, trust signals, and recent listings. If you want the hero page
 accessible at `/`, delete `app/page.tsx`.
 
-### 4. `prompt_move_in` dialog does not fire (medium priority)
+### 2. `prompt_move_in` dialog does not fire (medium priority)
 
 Layouts do not receive `searchParams` in Next.js App Router, so the
 `showMoveInPrompt` check in `(main)/layout.tsx` is dead code. The move-in date

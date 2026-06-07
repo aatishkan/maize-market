@@ -16,7 +16,7 @@ export default async function VerifyPage({ searchParams }: Props) {
   const { email } = await searchParams;
 
   return (
-    <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-6 text-center">
+    <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6 text-center">
       <div className="flex justify-center">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-um-blue-muted">
           <Mail className="h-8 w-8 text-um-blue" />

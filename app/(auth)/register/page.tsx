@@ -68,7 +68,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-6">
+    <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6">
       <div className="text-center space-y-1">
         <h1 className="text-2xl font-bold text-foreground">Create your account</h1>
         <p className="text-sm text-muted-foreground">

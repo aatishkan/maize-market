@@ -93,9 +93,9 @@ export function ListingFilters({ className }: ListingFiltersProps) {
         />
       </div>
 
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-end gap-3">
         {/* Category */}
-        <div className="min-w-[150px]">
+        <div className="sm:min-w-[150px]">
           <Label className="text-xs text-muted-foreground mb-1 block">Category</Label>
           <Select
             value={category || 'all'}
@@ -116,7 +116,7 @@ export function ListingFilters({ className }: ListingFiltersProps) {
         </div>
 
         {/* Logistics tier */}
-        <div className="min-w-[150px]">
+        <div className="sm:min-w-[150px]">
           <Label className="text-xs text-muted-foreground mb-1 block">Move logistics</Label>
           <Select
             value={tier || 'all'}
@@ -136,35 +136,35 @@ export function ListingFilters({ className }: ListingFiltersProps) {
           </Select>
         </div>
 
-        {/* Price range */}
-        <div className="flex items-end gap-1.5">
-          <div>
+        {/* Price range — spans both columns on mobile */}
+        <div className="col-span-2 flex items-end gap-1.5">
+          <div className="flex-1 sm:flex-none">
             <Label className="text-xs text-muted-foreground mb-1 block">Min $</Label>
             <Input
               type="number"
               placeholder="0"
               min={0}
               defaultValue={minPrice}
-              className="w-20 h-9 bg-white"
+              className="w-full sm:w-20 h-9 bg-white"
               onBlur={(e) => update({ min_price: e.target.value || null })}
             />
           </div>
           <span className="text-muted-foreground pb-2">–</span>
-          <div>
+          <div className="flex-1 sm:flex-none">
             <Label className="text-xs text-muted-foreground mb-1 block">Max $</Label>
             <Input
               type="number"
               placeholder="∞"
               min={0}
               defaultValue={maxPrice}
-              className="w-20 h-9 bg-white"
+              className="w-full sm:w-20 h-9 bg-white"
               onBlur={(e) => update({ max_price: e.target.value || null })}
             />
           </div>
         </div>
 
         {/* Status toggle */}
-        <div className="min-w-[120px]">
+        <div className="sm:min-w-[120px]">
           <Label className="text-xs text-muted-foreground mb-1 block">Status</Label>
           <Select
             value={status}
@@ -182,7 +182,7 @@ export function ListingFilters({ className }: ListingFiltersProps) {
         </div>
 
         {/* Sort */}
-        <div className="min-w-[160px] ml-auto">
+        <div className="sm:min-w-[160px] sm:ml-auto">
           <Label className="text-xs text-muted-foreground mb-1 block">Sort by</Label>
           <Select
             value={sort}
@@ -207,7 +207,7 @@ export function ListingFilters({ className }: ListingFiltersProps) {
             variant="ghost"
             size="sm"
             onClick={clearFilters}
-            className="h-9 text-muted-foreground gap-1.5"
+            className="col-span-2 w-full sm:w-auto h-9 text-muted-foreground gap-1.5"
           >
             <X className="h-3.5 w-3.5" />
             Clear
